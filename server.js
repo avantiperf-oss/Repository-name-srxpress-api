@@ -1,33 +1,24 @@
 import express from "express";
-import { initializeApp, cert, getApps } from "firebase-admin/app";
-import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import crypto from "crypto";
+import admin from "firebase-admin";
 
 const app = express();
 app.use(express.json());
 
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 1000;
 
-// Firebase Admin init
-if (!getApps().length) {
-  initializeApp({
-    credential: cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n")
-    })
-  });
-}
+// 🔥 Firebase config (Render Environment)
+const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
 
-const db = getFirestore();
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
+const db = admin.firestore();
 
 // توليد رقم تتبع
 function generateTracking() {
-  return "SRX" + Math.floor(100000000 + Math.random() * 900000000);
-}
-
-// توليد رقم شحنة
-function generateShipmentNumber() {
-  return "SRS" + Math.floor(100000000 + Math.random() * 900000000);
+  return "SRX" + Math.floor(1000000000 + Math.random() * 9000000000);
 }
 
 // الصفحة الرئيسية
@@ -35,12 +26,7 @@ app.get("/", (req, res) => {
   res.send("S&R Express API Running 🚀");
 });
 
-// health check
-app.get("/health", (req, res) => {
-  res.send("OK");
-});
-
-// إنشاء شحنة يدويًا
+// ✅ إنشاء شحنة
 app.post("/api/shipments/create-manual", async (req, res) => {
   try {
     const { receiver_name, destination_label, service_type } = req.body;
@@ -48,155 +34,66 @@ app.post("/api/shipments/create-manual", async (req, res) => {
     if (!receiver_name || !destination_label || !service_type) {
       return res.status(400).json({
         success: false,
-        message: "receiver_name, destination_label, service_type are required"
+        message: "receiver_name, destination_label, service_type are required",
       });
     }
 
     const tracking_number = generateTracking();
-    const shipment_number = generateShipmentNumber();
+    const shipment_number = "SRS" + Date.now();
 
-    const shipment = {
+    const shipmentData = {
       shipment_number,
       tracking_number,
       receiver_name,
       destination_label,
       service_type,
       status: "created",
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      timeline: [
-        {
-          title: "Shipment Created",
-          description: "Shipment has been created in S&R Express system",
-          location: "Saudi Arabia",
-          time: new Date().toISOString()
-        }
-      ]
+      created_at: new Date(),
     };
 
-    await db.collection("shipments").doc(tracking_number).set(shipment);
+    // 🔥 حفظ في Firebase
+    await db.collection("shipments").doc(tracking_number).set(shipmentData);
 
-    return res.status(201).json({
+    res.status(201).json({
       success: true,
-      shipment
+      shipment: shipmentData,
     });
+
   } catch (error) {
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
   }
 });
 
-// جلب كل الشحنات
-app.get("/api/shipments", async (req, res) => {
+// ✅ تتبع شحنة
+app.get("/api/shipments/:tracking", async (req, res) => {
   try {
-    const snapshot = await db.collection("shipments").get();
-    const shipments = snapshot.docs.map((doc) => doc.data());
+    const tracking = req.params.tracking;
 
-    return res.json({
-      success: true,
-      total: shipments.length,
-      shipments
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
-
-// تتبع شحنة
-app.get("/api/track/:trackingNumber", async (req, res) => {
-  try {
-    const trackingNumber = req.params.trackingNumber;
-    const doc = await db.collection("shipments").doc(trackingNumber).get();
+    const doc = await db.collection("shipments").doc(tracking).get();
 
     if (!doc.exists) {
       return res.status(404).json({
         success: false,
-        message: "Tracking number not found"
+        message: "Tracking number not found",
       });
     }
 
-    return res.json({
+    res.json({
       success: true,
-      shipment: doc.data()
+      shipment: doc.data(),
     });
+
   } catch (error) {
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
-      message: error.message
-    });
-  }
-});
-
-// تحديث حالة الشحنة
-app.post("/api/shipments/update-status", async (req, res) => {
-  try {
-    const { tracking_number, status, location, description } = req.body;
-
-    if (!tracking_number || !status) {
-      return res.status(400).json({
-        success: false,
-        message: "tracking_number and status are required"
-      });
-    }
-
-    const ref = db.collection("shipments").doc(tracking_number);
-    const doc = await ref.get();
-
-    if (!doc.exists) {
-      return res.status(404).json({
-        success: false,
-        message: "Shipment not found"
-      });
-    }
-
-    const timelineEvent = {
-      title: status,
-      description: description || "Shipment status updated",
-      location: location || "Unknown",
-      time: new Date().toISOString()
-    };
-
-    await ref.update({
-      status,
-      updated_at: new Date().toISOString(),
-      timeline: FieldValue.arrayUnion(timelineEvent)
-    });
-
-    const updatedDoc = await ref.get();
-
-    return res.json({
-      success: true,
-      shipment: updatedDoc.data()
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
-
-// Webhook سلة
-app.post("/api/salla/webhooks", async (req, res) => {
-  try {
-    console.log("Salla Webhook Received:", req.body);
-    return res.status(200).json({
-      success: true,
-      message: "Webhook received"
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: error.message
+      message: error.message,
     });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log("Server running on port " + PORT);
 });
