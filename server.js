@@ -1,32 +1,31 @@
 import express from "express";
-import crypto from "crypto";
 import admin from "firebase-admin";
+import crypto from "crypto";
 
 const app = express();
 app.use(express.json());
 
-const PORT = process.env.PORT || 1000;
-
-// 🔥 Firebase config (Render Environment)
+// 🔥 Firebase init
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+  });
+}
 
 const db = admin.firestore();
 
-// توليد رقم تتبع
+// 🧠 Generate IDs
 function generateTracking() {
   return "SRX" + Math.floor(1000000000 + Math.random() * 9000000000);
 }
 
-// الصفحة الرئيسية
-app.get("/", (req, res) => {
-  res.send("S&R Express API Running 🚀");
-});
+function generateShipment() {
+  return "SRS" + Math.floor(1000000000 + Math.random() * 9000000000);
+}
 
-// ✅ إنشاء شحنة
+// 🚀 Create shipment
 app.post("/api/shipments/create-manual", async (req, res) => {
   try {
     const { receiver_name, destination_label, service_type } = req.body;
@@ -39,9 +38,9 @@ app.post("/api/shipments/create-manual", async (req, res) => {
     }
 
     const tracking_number = generateTracking();
-    const shipment_number = "SRS" + Date.now();
+    const shipment_number = generateShipment();
 
-    const shipmentData = {
+    const shipment = {
       shipment_number,
       tracking_number,
       receiver_name,
@@ -51,31 +50,27 @@ app.post("/api/shipments/create-manual", async (req, res) => {
       created_at: new Date(),
     };
 
-    // 🔥 حفظ في Firebase
-    await db.collection("shipments").doc(tracking_number).set(shipmentData);
+    await db.collection("shipments").doc(tracking_number).set(shipment);
 
     res.status(201).json({
       success: true,
-      shipment: shipmentData,
+      shipment,
     });
-
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-// ✅ تتبع شحنة
-app.get("/api/shipments/:tracking", async (req, res) => {
+// 📦 Track shipment
+app.get("/api/shipments/track/:tracking", async (req, res) => {
   try {
-    const tracking = req.params.tracking;
-
-    const doc = await db.collection("shipments").doc(tracking).get();
+    const doc = await db
+      .collection("shipments")
+      .doc(req.params.tracking)
+      .get();
 
     if (!doc.exists) {
-      return res.status(404).json({
+      return res.json({
         success: false,
         message: "Tracking number not found",
       });
@@ -83,17 +78,17 @@ app.get("/api/shipments/:tracking", async (req, res) => {
 
     res.json({
       success: true,
-      shipment: doc.data(),
+      data: doc.data(),
     });
-
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-app.listen(PORT, () => {
-  console.log("Server running on port " + PORT);
+// 🟢 Health check
+app.get("/", (req, res) => {
+  res.send("S&R Express API Running 🚀");
 });
+
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log("Server running"));
