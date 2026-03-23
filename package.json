@@ -2,6 +2,7 @@
   "name": "srxpress-api",
   "version": "1.0.0",
   "description": "S&R Express Shipping API",
+  "type": "module",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
