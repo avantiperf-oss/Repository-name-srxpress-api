@@ -5,8 +5,8 @@ import crypto from "crypto";
 const app = express();
 app.use(express.json());
 
-// 🔥 Firebase init
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
+serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
 
 if (!admin.apps.length) {
   admin.initializeApp({
